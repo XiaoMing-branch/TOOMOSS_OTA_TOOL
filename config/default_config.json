@@ -1,0 +1,34 @@
+{
+  "device": {
+    "device_index": 0,
+    "channel_index": 0,
+    "baudrate": 19200,
+    "mode": 1
+  },
+  "lin_uds": {
+    "nad": 1,
+    "functional_nad": 126,
+    "req_id": 60,
+    "res_id": 61,
+    "check_type": 0,
+    "st_min": 10,
+    "timeout_ms": 200,
+    "max_block_length": 60
+  },
+  "security": {
+    "mask_hex": "2b7e151628aed2a6abf7158809cf4f3c",
+    "level_seed": 9,
+    "level_key": 10
+  },
+  "flash_driver": {
+    "enabled": true,
+    "target_ram_addr": "0x20008000",
+    "routine_verify_id": "0xDD02"
+  },
+  "app_firmware": {
+    "target_flash_addr": "0x08010000",
+    "flash_size": "0x00040000",
+    "routine_erase_id": "0xFF00",
+    "routine_check_id": "0xFF01"
+  }
+}
