@@ -177,8 +177,9 @@ class OtaApp(tk.Tk):
         proto_box = ttk.Frame(sidebar, style="Sidebar.TFrame")
         proto_box.pack(fill=tk.X, pady=(0, 8))
         self.var_bus_type = tk.StringVar(value="LIN")
-        ttk.Radiobutton(proto_box, text="LIN 总线 (UDS)", value="LIN", variable=self.var_bus_type, style="Sidebar.TRadiobutton", command=self._on_bus_type_changed).pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Radiobutton(proto_box, text="CAN 总线 (ISO-TP)", value="CAN", variable=self.var_bus_type, style="Sidebar.TRadiobutton", command=self._on_bus_type_changed).pack(side=tk.LEFT)
+        ttk.Radiobutton(proto_box, text="LIN", value="LIN", variable=self.var_bus_type, style="Sidebar.TRadiobutton", command=self._on_bus_type_changed).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Radiobutton(proto_box, text="CAN", value="CAN", variable=self.var_bus_type, style="Sidebar.TRadiobutton", command=self._on_bus_type_changed).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Radiobutton(proto_box, text="仿真 (Mock)", value="MOCK", variable=self.var_bus_type, style="Sidebar.TRadiobutton", command=self._on_bus_type_changed).pack(side=tk.LEFT)
 
         # 适配器设备探测
         ttk.Label(sidebar, text="USB 适配器设备", style="SidebarMuted.TLabel").pack(anchor=tk.W, pady=(4, 2))
@@ -394,7 +395,10 @@ class OtaApp(tk.Tk):
             self.lbl_addr_title.configure(text="从机 NAD 诊断地址")
             self.entry_addr.delete(0, tk.END)
             self.entry_addr.insert(0, "0x68")
-        else:
+            if hasattr(self, "entry_block_size"):
+                self.entry_block_size.delete(0, tk.END)
+                self.entry_block_size.insert(0, "60")
+        elif bus == "CAN":
             self.lbl_channel_title.configure(text="CAN 物理通道")
             self.cb_channel["values"] = self.available_can_channels
             self.cb_channel.current(0)
@@ -405,6 +409,23 @@ class OtaApp(tk.Tk):
             self.lbl_addr_title.configure(text="CAN 请求 ID")
             self.entry_addr.delete(0, tk.END)
             self.entry_addr.insert(0, "0x7E0")
+            if hasattr(self, "entry_block_size"):
+                self.entry_block_size.delete(0, tk.END)
+                self.entry_block_size.insert(0, "256")
+        else:  # MOCK 虚拟仿真模式
+            self.lbl_channel_title.configure(text="虚拟 ECU 仿真模式")
+            self.cb_channel["values"] = ["内置虚拟 ECU (免硬件)"]
+            self.cb_channel.current(0)
+
+            self.cb_baudrate["values"] = ["内存直通"]
+            self.cb_baudrate.set("内存直通")
+
+            self.lbl_addr_title.configure(text="虚拟节点地址")
+            self.entry_addr.delete(0, tk.END)
+            self.entry_addr.insert(0, "0x01 / 0x7E0")
+            if hasattr(self, "entry_block_size"):
+                self.entry_block_size.delete(0, tk.END)
+                self.entry_block_size.insert(0, "256")
 
     def _load_default_config(self):
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -501,11 +522,12 @@ class OtaApp(tk.Tk):
             self.log(f"扫描设备异常: {e}", tag="ERR")
 
     def on_toggle_connect(self):
-        if self.device is not None and self.device.is_opened:
-            try:
-                self.device.close()
-            except Exception:
-                pass
+        if self.client is not None:
+            if self.device is not None and self.device.is_opened:
+                try:
+                    self.device.close()
+                except Exception:
+                    pass
             self.device = None
             self.interface = None
             self.client = None
@@ -515,9 +537,35 @@ class OtaApp(tk.Tk):
             self.cb_baudrate.configure(state="readonly")
             self.lbl_conn_indicator.configure(text="● 未连接", foreground="#6E7681")
             self.lbl_device_detail.configure(text="适配器状态: 已安全断开")
-            self.log("已断开 Toomoss 适配器连接")
+            self.log("已断开通信连接")
         else:
             try:
+                bus_type = self.var_bus_type.get()
+                if bus_type == "MOCK":
+                    from ..uds.mock_simulator import MockUdsSimulator
+                    mask_str = self.entry_mask.get().strip()
+                    mask = bytes.fromhex(mask_str) if mask_str else bytes.fromhex("2b7e151628aed2a6abf7158809cf4f3c")
+                    iface = MockUdsSimulator(
+                        mask=mask,
+                        mask_fbl=mask,
+                        tx_logger=self._log_tx,
+                        rx_logger=self._log_rx,
+                        bus_type="CAN",
+                    )
+                    client = UdsClient(iface)
+                    self.device = None
+                    self.interface = iface
+                    self.client = client
+
+                    self.btn_connect.configure(text="断开连接", style="Danger.TButton")
+                    self.cb_channel.configure(state=tk.DISABLED)
+                    self.cb_devices.configure(state=tk.DISABLED)
+                    self.cb_baudrate.configure(state=tk.DISABLED)
+                    self.lbl_conn_indicator.configure(text="● 虚拟 ECU 就绪 (免硬件)", foreground=COLOR_SUCCESS)
+                    self.lbl_device_detail.configure(text="运行模式: 虚拟 ECU 内存仿真\n支持完整两阶段 OTA 升级与抓包")
+                    self.log("成功激活【虚拟 ECU 仿真模式】！无需物理硬件即可进行全流程诊断与 OTA 验证。", tag="INFO")
+                    return
+
                 sel_idx = self.cb_devices.current()
                 if sel_idx < 0:
                     sel_idx = 0
@@ -529,7 +577,6 @@ class OtaApp(tk.Tk):
                 if ch_idx < 0:
                     ch_idx = 0
 
-                bus_type = self.var_bus_type.get()
                 info = dev.get_info()
 
                 if bus_type == "LIN":
@@ -620,7 +667,7 @@ class OtaApp(tk.Tk):
             self.lbl_app_info.configure(text=f"错误: {e}")
 
     def on_start_ota(self):
-        if not self.client or not self.device or not self.device.is_opened:
+        if not self.client or (self.var_bus_type.get() != "MOCK" and (not self.device or not self.device.is_opened)):
             messagebox.showwarning("提示", "请先打开设备通道连接！")
             return
 

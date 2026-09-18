@@ -1,7 +1,7 @@
 import time
 import threading
 from typing import Optional, Tuple
-from ..toomoss.lin_interface import LinUdsInterface
+from .transport_base import TransportInterface
 from .defines import *
 from .security import calculate_aes_cmac
 
@@ -22,9 +22,10 @@ class UdsClient:
     """
     车规级 ISO 14229-1 (UDS) 诊断客户端
     负责诊断服务的请求打包、响应解析、NRC 校验与 TesterPresent 会话保活
+    支持 LIN-TP、CAN-TP 与虚拟仿真器统一传输
     """
 
-    def __init__(self, transport: LinUdsInterface):
+    def __init__(self, transport: TransportInterface):
         self.transport = transport
         self.active_session = SESSION_DEFAULT
         self._keepalive_active = False
@@ -32,26 +33,39 @@ class UdsClient:
 
     def raw_request(self, req_data: bytes, timeout_ms: int = 500, retry: int = 2) -> bytes:
         """
-        发送原始 UDS 报文并校验是否为负响应
+        发送原始 UDS 报文并校验是否为负响应，支持 NRC 0x78 (Response Pending) 动态 P2* 循环监控
         """
         resp = self.transport.request_response(req_data, timeout_ms=timeout_ms, retry_count=retry)
-        if len(resp) < 1:
-            raise TimeoutError("未收到 UDS 服务端响应")
+        
+        # 持续处理 NRC 0x78 (Response Pending)，直到收到最终肯定响应或其他否定响应
+        p2_star_ms = 5000  # 车规标准 P2* 典型上限 5000ms
+        max_pending_cycles = 60  # 防止 ECU 极端死循环卡死（最多允许 60 次 pending，约 5 分钟）
+        pending_cycle = 0
 
-        # 检查是否为负响应 0x7F
-        if resp[0] == SID_NEGATIVE_RESPONSE:
-            if len(resp) >= 3:
-                req_sid = resp[1]
-                nrc = resp[2]
-                # 若为 0x78 (Response Pending)，等待并继续收取最终响应
-                if nrc == NRC_RESPONSE_PENDING:
-                    time.sleep(0.05)
-                    return self.transport.receive_response(timeout_ms=3000)
-                raise UdsNegativeResponseError(req_sid, nrc)
-            else:
-                raise ValueError(f"畸形负响应报文: {resp.hex()}")
+        while True:
+            if len(resp) < 1:
+                raise TimeoutError("未收到 UDS 服务端响应")
 
-        return resp
+            # 检查是否为负响应 0x7F
+            if resp[0] == SID_NEGATIVE_RESPONSE:
+                if len(resp) >= 3:
+                    req_sid = resp[1]
+                    nrc = resp[2]
+                    # 若为 0x78 (Response Pending)，等待并继续收取后续响应
+                    if nrc == NRC_RESPONSE_PENDING:
+                        pending_cycle += 1
+                        if pending_cycle > max_pending_cycles:
+                            raise TimeoutError(
+                                f"ECU 持续回复 NRC 0x78 (Response Pending) 超出最大循环限制 ({max_pending_cycles})"
+                            )
+                        time.sleep(0.05)
+                        resp = self.transport.receive_response(timeout_ms=p2_star_ms)
+                        continue
+                    raise UdsNegativeResponseError(req_sid, nrc)
+                else:
+                    raise ValueError(f"畸形负响应报文: {resp.hex()}")
+
+            return resp
 
     # ----------------- 0x10 会话控制 -----------------
     def change_session(self, session: int, timeout_ms: int = 500) -> bytes:

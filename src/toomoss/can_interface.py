@@ -40,7 +40,10 @@ class CanUdsAddrConfig:
     max_data_len: int = 4096
 
 
-class CanUdsInterface:
+from ..uds.transport_base import TransportInterface
+
+
+class CanUdsInterface(TransportInterface):
     """
     Toomoss CAN UDS (ISO 15765-2 / ISO 14229) 诊断通信接口类
     收发报文严格按 8 字节格式呈现，空余位填充 0xFF

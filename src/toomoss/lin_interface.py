@@ -48,7 +48,10 @@ class LinUdsAddrConfig:
     max_data_len: int = 4096
 
 
-class LinUdsInterface:
+from ..uds.transport_base import TransportInterface
+
+
+class LinUdsInterface(TransportInterface):
     """
     Toomoss LIN UDS 通信接口类
     实现 ISO 14229-7 (UDS on LIN) / ISO 17987-2 的报文请求与响应收发

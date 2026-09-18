@@ -23,6 +23,7 @@ from src.ota.flasher import OtaFlasher, OtaConfig
 from src.toomoss.usb2xxx import Usb2xxxDevice
 from src.toomoss.lin_interface import LinUdsInterface, LinUdsAddrConfig
 from src.uds.client import UdsClient
+from src.uds.mock_simulator import MockUdsSimulator
 
 
 class MockLinUdsInterface:
@@ -319,6 +320,45 @@ class TestToomossOtaSuite(unittest.TestCase):
             print(f"\n[OK] 物理 Toomoss 设备在线自检通过: {info.firmware_name} (SN: {info.serial_number})")
         else:
             print("\n[跳过] 当前未插入 Toomoss 物理设备，跳过硬件探测")
+
+    def test_06_mock_simulator_pipeline(self):
+        """验证内置通用 MockUdsSimulator 虚拟仿真器两阶段 OTA 升级与 NRC 0x78 弹性循环"""
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        fdrv_path = os.path.join(base_dir, "samples", "sample_flash_drv.bin")
+        app_path = os.path.join(base_dir, "samples", "sample_app.bin")
+
+        mask = bytes.fromhex("2b7e151628aed2a6abf7158809cf4f3c")
+        sim = MockUdsSimulator(mask=mask, mask_fbl=mask, bus_type="CAN")
+        client = UdsClient(sim)
+
+        # 预设模拟 2 次 NRC 0x78 响应挂起
+        sim.simulate_nrc78_count = 2
+
+        cfg = OtaConfig(
+            mask=mask,
+            mask_fbl=mask,
+            flash_drv_path=fdrv_path,
+            flash_drv_addr=0x20008000,
+            app_path=app_path,
+            app_addr=0x08010000,
+            block_size=60,
+        )
+
+        flasher = OtaFlasher(client, cfg)
+        progress_records = []
+
+        def _prog(pct, txt):
+            progress_records.append((pct, txt))
+
+        # 执行升级
+        success = flasher.execute(progress_cb=_prog)
+
+        # 校验升级完成
+        self.assertTrue(success)
+        self.assertGreaterEqual(len(progress_records), 5)
+        self.assertEqual(progress_records[-1][0], 100.0)
+        self.assertTrue(sim.app_verified)
+        self.assertEqual(sim.session, SESSION_DEFAULT)
 
 
 if __name__ == "__main__":
