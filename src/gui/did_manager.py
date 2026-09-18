@@ -259,9 +259,37 @@ class DidReaderWindow(tk.Toplevel):
         )
         self.lbl_progress_status.pack(side=tk.RIGHT, padx=(10, 0))
 
-        # 中间数据表格区
+        # 中间数据表格区 - 显式适配深色高对比度主题样式
         table_frame = tk.Frame(self, bg="#12131C")
         table_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 6))
+
+        style = ttk.Style(self)
+        style.configure(
+            "DidTree.Treeview",
+            background="#161B22",
+            foreground="#F0F6FC",
+            fieldbackground="#161B22",
+            font=("Segoe UI", 9),
+            rowheight=26,
+            borderwidth=0,
+        )
+        style.configure(
+            "DidTree.Treeview.Heading",
+            background="#21262D",
+            foreground="#58A6FF",
+            font=("Segoe UI", 9, "bold"),
+            relief="flat",
+        )
+        style.map(
+            "DidTree.Treeview",
+            background=[("selected", "#1F6FEB")],
+            foreground=[("selected", "#FFFFFF")],
+        )
+        style.map(
+            "DidTree.Treeview.Heading",
+            background=[("active", "#30363D")],
+            foreground=[("active", "#79C0FF")],
+        )
 
         columns = ("select", "did", "iso_name", "name_cn", "ascii", "parsed", "hex", "status")
         self.tree = ttk.Treeview(
@@ -269,6 +297,7 @@ class DidReaderWindow(tk.Toplevel):
             columns=columns,
             show="headings",
             selectmode="browse",
+            style="DidTree.Treeview",
         )
 
         self.tree.heading("select", text="选择", anchor=tk.CENTER)

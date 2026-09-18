@@ -58,25 +58,53 @@ class UdsClient:
         """
         0x10 诊断会话控制
         :param session: SESSION_DEFAULT (0x01) / SESSION_PROGRAMMING (0x02) / SESSION_EXTENDED (0x03)
+                        可与 0x80 (SPRMIB) 按位或来抑制正响应
         """
+        suppress = bool(session & 0x80)
+        actual_session = session & 0x7F
         req = bytes([SID_DIAGNOSTIC_SESSION_CONTROL, session])
-        resp = self.raw_request(req, timeout_ms=timeout_ms)
-        if len(resp) < 2 or resp[0] != (SID_DIAGNOSTIC_SESSION_CONTROL + 0x40):
-            raise ValueError(f"会话控制响应无效: {resp.hex()}")
-        self.active_session = session
-        return resp
+
+        if suppress:
+            # SPRMIB 抑制正响应：发送请求，不期望正响应
+            try:
+                resp = self.transport.request_response(req, timeout_ms=timeout_ms)
+            except Exception:
+                resp = b""
+            self.active_session = actual_session
+            # 即使收到响应（如非抑制实现），也直接返回
+            if resp and len(resp) >= 2 and resp[0] == (SID_DIAGNOSTIC_SESSION_CONTROL + 0x40):
+                return resp
+            return bytes([SID_DIAGNOSTIC_SESSION_CONTROL + 0x40, actual_session])
+        else:
+            resp = self.raw_request(req, timeout_ms=timeout_ms)
+            if len(resp) < 2 or resp[0] != (SID_DIAGNOSTIC_SESSION_CONTROL + 0x40):
+                raise ValueError(f"会话控制响应无效: {resp.hex()}")
+            self.active_session = actual_session
+            return resp
 
     # ----------------- 0x85 控制 DTC 记录 -----------------
     def control_dtc_setting(self, setting_type: int = DTC_SETTING_OFF, timeout_ms: int = 500) -> bytes:
         """
         0x85 控制 DTC 存储开关
         :param setting_type: DTC_SETTING_ON (0x01) / DTC_SETTING_OFF (0x02)
+                             可与 0x80 (SPRMIB) 按位或来抑制正响应
         """
+        suppress = bool(setting_type & 0x80)
         req = bytes([SID_CONTROL_DTC_SETTING, setting_type])
-        resp = self.raw_request(req, timeout_ms=timeout_ms)
-        if len(resp) < 2 or resp[0] != (SID_CONTROL_DTC_SETTING + 0x40):
-            raise ValueError(f"控制 DTC 记录响应无效: {resp.hex()}")
-        return resp
+
+        if suppress:
+            try:
+                resp = self.transport.request_response(req, timeout_ms=timeout_ms)
+            except Exception:
+                resp = b""
+            if resp and len(resp) >= 2 and resp[0] == (SID_CONTROL_DTC_SETTING + 0x40):
+                return resp
+            return bytes([SID_CONTROL_DTC_SETTING + 0x40, setting_type & 0x7F])
+        else:
+            resp = self.raw_request(req, timeout_ms=timeout_ms)
+            if len(resp) < 2 or resp[0] != (SID_CONTROL_DTC_SETTING + 0x40):
+                raise ValueError(f"控制 DTC 记录响应无效: {resp.hex()}")
+            return resp
 
     # ----------------- 0x27 安全访问 -----------------
     def security_access(
@@ -126,6 +154,19 @@ class UdsClient:
         if len(resp) < 3 or resp[0] != (SID_READ_DATA_BY_IDENTIFIER + 0x40):
             raise ValueError(f"读 DID 响应无效: {resp.hex()}")
         return resp[3:]
+
+    # ----------------- 0x2E 写入 DID -----------------
+    def write_data_by_id(self, did: int, data: bytes, timeout_ms: int = 500) -> bytes:
+        """
+        0x2E 通过标识符写入数据 (如 F184 刷写指纹)
+        :param did: 16位数据标识符
+        :param data: 待写入的数据字节
+        """
+        req = bytes([SID_WRITE_DATA_BY_IDENTIFIER, (did >> 8) & 0xFF, did & 0xFF]) + data
+        resp = self.raw_request(req, timeout_ms=timeout_ms)
+        if len(resp) < 3 or resp[0] != (SID_WRITE_DATA_BY_IDENTIFIER + 0x40):
+            raise ValueError(f"写 DID 响应无效: {resp.hex()}")
+        return resp
 
     # ----------------- 0x31 例程控制 -----------------
     def routine_control(

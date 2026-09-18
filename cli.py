@@ -21,7 +21,7 @@ def main():
     parser.add_argument("--device-idx", type=int, default=0, help="Toomoss 设备索引 (默认: 0)")
     parser.add_argument("--channel", type=int, default=0, help="LIN 通道索引 (默认: 0)")
     parser.add_argument("--baudrate", type=int, default=19200, help="LIN 波特率 (默认: 19200)")
-    parser.add_argument("--nad", type=lambda x: int(x, 0), default=0x01, help="ECU 诊断节点地址 NAD (默认: 0x01)")
+    parser.add_argument("--nad", type=lambda x: int(x, 0), default=0x68, help="ECU 诊断节点地址 NAD (默认: 0x68)")
     parser.add_argument("--app", type=str, required=True, help="APP 固件文件路径 (.bin / .hex)")
     parser.add_argument("--app-addr", type=lambda x: int(x, 0), default=0x08010000, help="APP 目标 Flash 基址 (默认: 0x08010000)")
     parser.add_argument("--flash-drv", type=str, default=None, help="Flash Driver 擦写驱动文件路径 (.bin)")
