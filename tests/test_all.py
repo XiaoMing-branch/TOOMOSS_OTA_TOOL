@@ -424,6 +424,49 @@ class TestToomossOtaSuite(unittest.TestCase):
         keepalive_count_after_idle = sum(1 for _, d in tx_history if len(d) >= 1 and d[0] == 0x3E)
         self.assertGreaterEqual(keepalive_count_after_idle, 1, "总线空闲后保活应正常触发")
 
+    def test_09_erase_format_and_sign_key_isolation(self):
+        """验证 0xFF00 擦除例程 12 字节标准报文格式与独立 sign_key 签名隔离机制"""
+        tx_frames = []
+
+        class EraseSpySimulator(MockUdsSimulator):
+            def send_request(self, req_data: bytes) -> bool:
+                tx_frames.append(req_data)
+                return super().send_request(req_data)
+
+        level1_mask = bytes.fromhex("2b7e151628aed2a6abf7158809cf4f3c")
+        fbl_mask = bytes.fromhex("00112233445566778899aabbccddeeff")
+        sign_key = bytes.fromhex("1032547698badcfe0123456789abcdef")
+
+        sim = EraseSpySimulator(mask=level1_mask, mask_fbl=fbl_mask, sign_key=sign_key, bus_type="CAN")
+        client = UdsClient(sim)
+
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        fdrv_path = os.path.join(base_dir, "samples", "sample_flash_drv.bin")
+        app_path = os.path.join(base_dir, "samples", "sample_app.bin")
+
+        cfg = OtaConfig(
+            mask=level1_mask,
+            mask_fbl=fbl_mask,
+            sign_key=sign_key,
+            flash_drv_path=fdrv_path,
+            flash_drv_addr=0x20008000,
+            app_path=app_path,
+            app_addr=0x08010000,
+            block_size=256,
+        )
+
+        flasher = OtaFlasher(client, cfg)
+        ok = flasher.execute()
+        self.assertTrue(ok, "端到端三级独立密钥刷写必须成功")
+
+        # 检查发出的 0xFF00 擦除报文
+        erase_reqs = [f for f in tx_frames if len(f) >= 4 and f[0] == 0x31 and f[1] == 0x01 and f[2] == 0xFF and f[3] == 0x00]
+        self.assertEqual(len(erase_reqs), 1, "必须发送 1 次 0xFF00 擦除例程")
+        # 验证长度严格为 12 字节 (Q/SK J02.321 表 42: 31 01 FF 00 + 4B 地址 + 4B 长度)
+        self.assertEqual(len(erase_reqs[0]), 12, "0xFF00 请求必须为标准 12 字节 (无 0x44 前缀)")
+        addr_parsed = int.from_bytes(erase_reqs[0][4:8], "big")
+        self.assertEqual(addr_parsed, 0x08010000, "擦除起始地址必须精确匹配")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

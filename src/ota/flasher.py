@@ -16,9 +16,10 @@ DID_FINGERPRINT = 0xF184  # 刷写指纹 (16 字节)
 
 @dataclass
 class OtaConfig:
-    # 安全密钥 (双级独立密钥，默认使用同一 Mask，量产时应分离)
+    # 安全密钥 (双级独立密钥与独立软件包签名密钥，依据 Q/SK J02.321 与下位机 uds_crypto_cfg.h)
     mask: bytes = bytes.fromhex("2b7e151628aed2a6abf7158809cf4f3c")
     mask_fbl: bytes = b""  # FBL 级独立密钥，为空则复用 mask
+    sign_key: bytes = b""  # 软件包安全签名密钥（0xDD02），为空则复用 mask_fbl
 
     # 刷写指纹 (16 字节，标识刷写操作者身份，依据 Q/SK J02.321)
     fingerprint: bytes = bytes(16)
@@ -115,8 +116,9 @@ class OtaFlasher:
             app_fw = FirmwareImage(self.config.app_path)
             _log(f"APP 固件大小: {app_fw.size} 字节, CRC32: 0x{app_fw.crc32:08X}")
 
-            # 确定 FBL 密钥 (若未独立配置则复用 mask)
+            # 确定 FBL 密钥与软件包签名密钥 (若未独立配置则向上回退)
             mask_fbl = self.config.mask_fbl if self.config.mask_fbl else self.config.mask
+            sign_key = self.config.sign_key if self.config.sign_key else mask_fbl
 
             # ============================================================
             # 预编程阶段 (Extended Session)
@@ -220,7 +222,7 @@ class OtaFlasher:
 
                 # ---- 步骤 11: Flash Driver CMAC 签名验证 (31 01 DD 02) ----
                 _prog(38.0, "步骤 11/20: 校验 Flash Driver 签名 (0x31 01 DD 02)...")
-                drv_sig = flash_drv_fw.calculate_cmac_signature(mask_fbl)
+                drv_sig = flash_drv_fw.calculate_cmac_signature(sign_key)
                 resp_verify = self.client.routine_control(
                     subfunc=ROUTINE_START,
                     routine_id=self.config.routine_verify_drv_id,
@@ -241,7 +243,7 @@ class OtaFlasher:
             _prog(42.0, f"步骤 12/20: 擦除 Flash APP 分区 (0x{self.config.app_addr:08X})...")
             addr_bytes = self.config.app_addr.to_bytes(4, "big")
             size_bytes = app_fw.size.to_bytes(4, "big")
-            erase_option = b"\x44" + addr_bytes + size_bytes
+            erase_option = addr_bytes + size_bytes  # Q/SK J02.321 表 42 标准格式: 31 01 FF 00 + 4B 开始地址 + 4B 长度 (共 12 字节)
             try:
                 self.client.routine_control(
                     subfunc=ROUTINE_START,
@@ -291,7 +293,7 @@ class OtaFlasher:
 
             # ---- 步骤 17: APP 固件 CMAC 签名验证 (31 01 DD 02) ----
             _prog(87.0, "步骤 17/20: 校验 APP 固件签名 (0x31 01 DD 02)...")
-            app_sig = app_fw.calculate_cmac_signature(mask_fbl)
+            app_sig = app_fw.calculate_cmac_signature(sign_key)
             resp_app_verify = self.client.routine_control(
                 subfunc=ROUTINE_START,
                 routine_id=self.config.routine_verify_app_id,

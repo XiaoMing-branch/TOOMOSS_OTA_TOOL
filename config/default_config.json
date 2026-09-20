@@ -17,6 +17,8 @@
   },
   "security": {
     "mask_hex": "2b7e151628aed2a6abf7158809cf4f3c",
+    "mask_fbl_hex": "00112233445566778899aabbccddeeff",
+    "sign_key_hex": "1032547698badcfe0123456789abcdef",
     "level_seed": 9,
     "level_key": 10
   },

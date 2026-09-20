@@ -22,12 +22,14 @@ class MockUdsSimulator(TransportInterface):
         self,
         mask: bytes = bytes.fromhex("2b7e151628aed2a6abf7158809cf4f3c"),
         mask_fbl: bytes = bytes.fromhex("2b7e151628aed2a6abf7158809cf4f3c"),
+        sign_key: bytes = b"",
         tx_logger: Optional[Callable[..., None]] = None,
         rx_logger: Optional[Callable[..., None]] = None,
         bus_type: str = "CAN",  # "CAN" 或 "LIN"
     ):
         self.mask = mask
         self.mask_fbl = mask_fbl or mask
+        self.sign_key = sign_key
         self.tx_logger = tx_logger
         self.rx_logger = rx_logger
         self.bus_type = bus_type
@@ -262,14 +264,18 @@ class MockUdsSimulator(TransportInterface):
                 if self.session != SESSION_PROGRAMMING or not self.security_fbl_unlocked:
                     return bytes([0x7F, sid, NRC_SECURITY_ACCESS_DENIED])
                 self.app_erased = True
-                return bytes([0x71, ctrl_type, req[2], req[3], 0x00])
+                return bytes([0x71, ctrl_type, req[2], req[3]])  # Q/SK J02.321 表 43: 71 01 FF 00
 
             elif rid == RID_SECURITY_SIGN_CHECK:  # 0xDD02
                 # 校验固件 CMAC 签名
                 if len(req) >= 20:
                     sig_received = req[4:20]
-                    # 计算当前缓冲的 CMAC
-                    active_mask = self.mask_fbl if self.session == SESSION_PROGRAMMING else self.mask
+                    # 计算当前缓冲的 CMAC：配置了 sign_key 则优先使用
+                    active_mask = (
+                        self.sign_key
+                        if self.sign_key
+                        else (self.mask_fbl if self.session == SESSION_PROGRAMMING else self.mask)
+                    )
                     expected_sig = calculate_aes_cmac(active_mask, bytes(self.buffer))
                     if sig_received == expected_sig:
                         if self.download_target == 0x20008000:
