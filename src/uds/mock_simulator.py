@@ -60,15 +60,20 @@ class MockUdsSimulator(TransportInterface):
         self._pending_response = b""
 
     def _log_frame(self, data: bytes, is_rx: bool = False):
-        """模拟将数据以 CAN (8B) 或 LIN (8B) 格式输出到监视器"""
+        """模拟将数据以 CAN (8B) 或 LIN (8B) 格式输出到监视器 (单帧或首帧)"""
         logger = self.rx_logger if is_rx else self.tx_logger
         if not logger:
             return
 
         if self.bus_type == "CAN":
             arb_id = 0x7E8 if is_rx else 0x7E0
-            # 简单展示首包/单包
-            frame = (bytes([len(data)]) + data)[:8].ljust(8, b'\xFF')
+            if len(data) <= 7:
+                # CAN ISO-TP 单帧 (SF: 0x00 | LEN)
+                frame = (bytes([len(data)]) + data).ljust(8, b'\xFF')
+            else:
+                # CAN ISO-TP 首帧 (FF: 0x10 | DL_MSB, DL_LSB)
+                ff_pci = bytes([0x10 | ((len(data) >> 8) & 0x0F), len(data) & 0xFF])
+                frame = (ff_pci + data[:6]).ljust(8, b'\xFF')
             try:
                 logger(frame, pid=arb_id)
             except TypeError:
@@ -76,7 +81,13 @@ class MockUdsSimulator(TransportInterface):
         else:
             pid = 0x3D if is_rx else 0x3C
             nad = 0x01
-            frame = (bytes([nad, len(data)]) + data)[:8].ljust(8, b'\xFF')
+            if len(data) <= 5:
+                # LIN-TP 单帧 (NAD, LEN)
+                frame = (bytes([nad, len(data)]) + data).ljust(8, b'\xFF')
+            else:
+                # LIN-TP 首帧 (NAD, 0x10 | DL_MSB, DL_LSB)
+                ff_pci = bytes([nad, 0x10 | ((len(data) >> 8) & 0x0F), len(data) & 0xFF])
+                frame = (ff_pci + data[:5]).ljust(8, b'\xFF')
             try:
                 logger(frame, pid=pid)
             except TypeError:
