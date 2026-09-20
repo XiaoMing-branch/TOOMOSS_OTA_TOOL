@@ -390,6 +390,40 @@ class TestToomossOtaSuite(unittest.TestCase):
             parsed, ascii_str = parse_did_payload(item.did, raw)
             self.assertTrue(len(parsed) > 0)
 
+    def test_08_keepalive_concurrency_protection(self):
+        """验证 TesterPresent 后台保活线程的并发锁与总线空闲检测机制"""
+        tx_history = []
+
+        class LockSpySimulator(MockUdsSimulator):
+            def send_request(self, req_data: bytes) -> bool:
+                tx_history.append((time.time(), req_data))
+                return super().send_request(req_data)
+
+        sim = LockSpySimulator(bus_type="CAN")
+        client = UdsClient(sim)
+
+        # 启动高频保活 (0.1s)
+        client.start_keepalive(interval_sec=0.1)
+
+        # 在 0.3s 内密集发送诊断请求（模拟持续传输 0x36 数据块）
+        start = time.time()
+        req_count = 0
+        while time.time() - start < 0.3:
+            client.change_session(SESSION_EXTENDED)
+            req_count += 1
+            time.sleep(0.02)
+
+        # 验证在密集传输期间，保活线程绝未强插 3E 80
+        keepalive_count_during_busy = sum(1 for _, d in tx_history if len(d) >= 1 and d[0] == 0x3E)
+        self.assertEqual(keepalive_count_during_busy, 0, "密集通信期间不得强插保活报文")
+
+        # 随后空闲等待 0.35s，保活线程应自动触发
+        time.sleep(0.35)
+        client.stop_keepalive()
+
+        keepalive_count_after_idle = sum(1 for _, d in tx_history if len(d) >= 1 and d[0] == 0x3E)
+        self.assertGreaterEqual(keepalive_count_after_idle, 1, "总线空闲后保活应正常触发")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

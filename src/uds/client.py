@@ -30,12 +30,16 @@ class UdsClient:
         self.active_session = SESSION_DEFAULT
         self._keepalive_active = False
         self._keepalive_thread: Optional[threading.Thread] = None
+        self._lock = threading.Lock()
+        self._last_comm_time = time.time()
 
     def raw_request(self, req_data: bytes, timeout_ms: int = 500, retry: int = 2) -> bytes:
         """
         发送原始 UDS 报文并校验是否为负响应，支持 NRC 0x78 (Response Pending) 动态 P2* 循环监控
         """
-        resp = self.transport.request_response(req_data, timeout_ms=timeout_ms, retry_count=retry)
+        with self._lock:
+            self._last_comm_time = time.time()
+            resp = self.transport.request_response(req_data, timeout_ms=timeout_ms, retry_count=retry)
         
         # 持续处理 NRC 0x78 (Response Pending)，直到收到最终肯定响应或其他否定响应
         p2_star_ms = 5000  # 车规标准 P2* 典型上限 5000ms
@@ -59,7 +63,9 @@ class UdsClient:
                                 f"ECU 持续回复 NRC 0x78 (Response Pending) 超出最大循环限制 ({max_pending_cycles})"
                             )
                         time.sleep(0.05)
-                        resp = self.transport.receive_response(timeout_ms=p2_star_ms)
+                        with self._lock:
+                            self._last_comm_time = time.time()
+                            resp = self.transport.receive_response(timeout_ms=p2_star_ms)
                         continue
                     raise UdsNegativeResponseError(req_sid, nrc)
                 else:
@@ -287,7 +293,9 @@ class UdsClient:
         subfunc = 0x80 if suppress_pos_resp else 0x00
         req = bytes([SID_TESTER_PRESENT, subfunc])
         if suppress_pos_resp:
-            self.transport.send_request(req)
+            with self._lock:
+                self._last_comm_time = time.time()
+                self.transport.send_request(req)
             return None
         else:
             return self.raw_request(req, timeout_ms=timeout_ms)
@@ -295,6 +303,7 @@ class UdsClient:
     def start_keepalive(self, interval_sec: float = 2.0):
         """
         启动后台会话保活线程（维持非默认会话与 S3 定时器）
+        【并发安全保护】：仅在总线空闲且获取到非阻塞锁时发送保活帧，严禁打断正在进行的数据块传输
         """
         if self._keepalive_active:
             return
@@ -302,13 +311,21 @@ class UdsClient:
 
         def _worker():
             while self._keepalive_active:
-                time.sleep(interval_sec)
+                time.sleep(0.2)
                 if not self._keepalive_active:
                     break
-                try:
-                    self.tester_present(suppress_pos_resp=True)
-                except Exception:
-                    pass
+                # 只有当总线空闲时间达到保活周期时才发送保活，严禁在积极传输数据块时插包
+                if (time.time() - self._last_comm_time) >= interval_sec:
+                    if self._lock.acquire(blocking=False):
+                        try:
+                            subfunc = 0x80
+                            req = bytes([SID_TESTER_PRESENT, subfunc])
+                            self.transport.send_request(req)
+                            self._last_comm_time = time.time()
+                        except Exception:
+                            pass
+                        finally:
+                            self._lock.release()
 
         self._keepalive_thread = threading.Thread(target=_worker, daemon=True)
         self._keepalive_thread.start()
