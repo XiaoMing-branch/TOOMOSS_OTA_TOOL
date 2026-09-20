@@ -360,6 +360,37 @@ class TestToomossOtaSuite(unittest.TestCase):
         self.assertTrue(sim.app_verified)
         self.assertEqual(sim.session, SESSION_DEFAULT)
 
+    def test_07_did_manager_parsing(self):
+        """验证国际标准规范 DID 诊断读取与智能解析逻辑"""
+        from src.gui.did_manager import STANDARD_DIDS, parse_did_payload, format_bytes_to_ascii
+
+        sim = MockUdsSimulator(bus_type="CAN")
+        client = UdsClient(sim)
+
+        # 1. 验证 0xF186 (会话)
+        raw_session = client.read_data_by_id(0xF186)
+        parsed, _ = parse_did_payload(0xF186, raw_session)
+        self.assertIn("默认会话", parsed)
+
+        # 2. 验证 0xF190 (VIN)
+        raw_vin = client.read_data_by_id(0xF190)
+        parsed, ascii_str = parse_did_payload(0xF190, raw_vin)
+        self.assertEqual(ascii_str, "LSGPC52U0N0123456")
+        self.assertIn("LSGPC52U0N0123456", parsed)
+
+        # 3. 验证 0xF187 (零件号)
+        raw_part = client.read_data_by_id(0xF187)
+        parsed, ascii_str = parse_did_payload(0xF187, raw_part)
+        self.assertEqual(ascii_str, "ALIENTEK-STM32")
+
+        # 4. 验证全部 STANDARD_DIDS 均可通过 Mock 仿真器读取
+        for item in STANDARD_DIDS:
+            raw = client.read_data_by_id(item.did)
+            self.assertGreater(len(raw), 0)
+            parsed, ascii_str = parse_did_payload(item.did, raw)
+            self.assertTrue(len(parsed) > 0)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+

@@ -457,6 +457,9 @@ class OtaApp(tk.Tk):
             self._set_app_file(sample_app)
 
     def log(self, text: str, tag: str = "INFO"):
+        if threading.current_thread() != threading.main_thread():
+            self.after(0, lambda: self.log(text, tag))
+            return
         timestamp = time.strftime("%H:%M:%S") + f".{int(time.time()*1000)%1000:03d} "
         self.txt_log.insert(tk.END, timestamp, "TIME")
         self.txt_log.insert(tk.END, f"[{tag}] {text}\n", tag)

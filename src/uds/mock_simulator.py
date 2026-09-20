@@ -203,6 +203,32 @@ class MockUdsSimulator(TransportInterface):
             did = (req[1] << 8) | req[2]
             if did == 0xF184:
                 return bytes([0x62, req[1], req[2]]) + self.fingerprint
+            if did == 0xF186:
+                return bytes([0x62, req[1], req[2], self.session])
+            if did == 0xF180:
+                return bytes([0x62, req[1], req[2]]) + b"BOOT_V1.0.0"
+            if did == 0xF187:
+                return bytes([0x62, req[1], req[2]]) + b"ALIENTEK-STM32"
+            if did == 0xF188:
+                return bytes([0x62, req[1], req[2]]) + b"SW_NUM_001"
+            if did == 0xF189:
+                return bytes([0x62, req[1], req[2]]) + b"SW_VER_01.00"
+            if did == 0xF18A:
+                return bytes([0x62, req[1], req[2]]) + b"SUPPLIER_ALI"
+            if did == 0xF18C:
+                return bytes([0x62, req[1], req[2]]) + b"SN2026090001"
+            if did == 0xF190:
+                return bytes([0x62, req[1], req[2]]) + b"LSGPC52U0N0123456"
+            if did == 0xF194:
+                return bytes([0x62, req[1], req[2]]) + b"SYS_SW_001"
+            if did == 0xF195:
+                return bytes([0x62, req[1], req[2]]) + b"SYS_VER_1.0"
+            if did == 0xF197:
+                return bytes([0x62, req[1], req[2]]) + b"STM32F103_ECU"
+            if did == 0x0216:
+                return bytes([0x62, req[1], req[2]]) + b"APP_V1.0.0"
+            if did == 0xF0F0:
+                return bytes([0x62, req[1], req[2]]) + b"A"
             return bytes([0x62, req[1], req[2], 0x01, 0x00, 0x01])
 
         # 0x2E 写 DID
