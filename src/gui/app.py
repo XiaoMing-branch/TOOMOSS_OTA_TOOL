@@ -709,6 +709,13 @@ class OtaApp(tk.Tk):
         threading.Thread(target=self._flasher_worker, daemon=True).start()
 
     def _flasher_worker(self):
+        """
+        后台异步刷写工作线程。
+        
+        【线程安全设计说明】：
+        Tkinter 基于单线程事件循环模型，跨线程直接操作 UI 控件存在竞态甚至导致解释器崩溃。
+        此处严格通过 self.after(0, ...) 将进度刷新、日志记录与弹窗调度回派发到主线程消息队列安全执行。
+        """
         def _prog_cb(pct: float, txt: str):
             self.after(0, lambda: self._update_progress(pct, txt))
 
